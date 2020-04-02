@@ -34,6 +34,14 @@ class Imposter:
     def get_csrf_token(self, soup):
         return soup.find("gremlin-app")["csrf"]
 
+    def spacescience_human_lookup(self, note_id):
+        r = self.session.get(
+            "https://spacescience.tech/check.php", params={"id": note_id}
+        )
+        j = json.loads(r.text)
+        results = [res["result"] for res in list(j.values())[:-1]]
+        return results.count("LOSE") > 0
+
     def get_notes(self):
         r = self.session.get("https://gremlins-api.reddit.com/room")
         soup = BeautifulSoup(r.content, "lxml")
@@ -50,7 +58,8 @@ class Imposter:
             "csrf_token": self.current_csrf_token,
         }
         r = self.session.post("https://gremlins-api.reddit.com/submit_guess", data=data)
-        return r
+        j = json.loads(r.text)
+        return j["result"] == "WIN"
 
     def create_note(self, note):
         r = self.session.get("https://gremlins-api.reddit.com/create_note")
@@ -69,6 +78,19 @@ class Imposter:
             else:
                 print(ans)
 
+    def get_results(self):
+        r = self.session.get("https://gremlins-api.reddit.com/results")
+        soup = BeautifulSoup(r.content, "lxml")
+        stats = " ".join(
+            [
+                s["aria-label"]
+                for s in soup.find("gremlin-meta").find_all(
+                    "span", {"aria-label": not None}
+                )
+            ]
+        )
+        return stats
+
 
 def main():
     reddit_username = input("Username: ")
@@ -77,15 +99,27 @@ def main():
     imposter = Imposter()
     imposter.login(reddit_username, reddit_password)
 
-    # get notes to choose from and select a random one
-    imposter.get_notes()
-    import random
-    rand_note_id = random.choice(list(imposter.current_notes.keys()))
-    r = imposter.submit_guess(rand_note_id)
+    for i in range(100):
+        if i % 10 == 0:
+            print(imposter.get_results())
+        imposter.get_notes()
 
-    # update my own note and get its note_id
-    note_id = imposter.create_note("six times seven plus five equals fourtyseven")
-    print(note_id)
+        spacescience = [
+            imposter.spacescience_human_lookup(n) for n in imposter.current_notes
+        ]
+        possible_imposters = [i for i, x in enumerate(spacescience) if not x]
+
+        import random
+
+        if len(possible_imposters) > 1:  # choose random one
+            choice = random.choice(possible_imposters)
+        elif len(possible_imposters) == 0:  # all are human?!
+            print("This should not happen...")
+        else:  # choose the only option
+            choice = possible_imposters[0]
+
+        win = imposter.submit_guess(list(imposter.current_notes.keys())[choice])
+        print(len(possible_imposters), win)
 
 
 if __name__ == "__main__":
